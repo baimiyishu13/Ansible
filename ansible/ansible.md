@@ -969,3 +969,51 @@ ansible db -m group -a 'name=nginx gid=88 system=yes'
 # 删除
 ansible db -m group -a 'name=nginx state=absent'
 ```
+#### 3.1.13 Lineinfie模块 ####
+
+ansible在使用sed 进行替换的时候，经常会遇到需要转义的问题，而且ansible在遇到特殊符号进行替换时，存在问题，无法正常替换。
+
+ansible自身模块（两种）
+
++ lineinfile 模块
++ replace 模块
+
+可以很方便的进行替换，功能：`相当于sed，可以修改文件内容`
+
+```SH
+# 修改SELINUX
+ansible db -m lineinfile -a "path=/etc/selinux/config regexp='^SELINUX=' line=SELINUX=enforcing"
+# 删除注释行
+ansible db -m lineinfile -a 'dest=/etc/fstab state=absent regexp="^#"'
+```
+
+#### 3.4.16 replace模块 ####
+
+该模块优点类似于 sed命令。主要也是基于正则表达式匹配和替换
+
+示例：
+
+```sh
+ansible db -m replace -a "path=/etc/fstab regexp='^(UUID.*)' replace='#\1'"
+```
+
+#### 3.4.17 Setup 模块 ####
+
+功能：setup 模块来`收集主机的系统信息`，这些facts信息可以直接以变量的形式使用，但是如果主机较多，会影响执行速度，
+
+使用：`gather_facts:no` 来禁止ansible收集facts信息
+
++ filter : 过滤器
++ gather
+
+```SH
+ansible all -m setup -a 'gather_subset=!all'
+ansible all -m setup -a 'gather_subset=!any'
+ansible db -m setup -a 'filter=ansible_user_shell'
+ansible db -m setup -a 'filter=ansible_hostname'
+ansible db -m setup -a 'filter=ansible_distribution_version'
+ansible db -m setup -a 'filter=ansible_distribution'
+ansible db -m setup -a 'filter=ansible_all_ipv4_addresses'
+```
+
+用途：作为条件判断（系统、版本、hostname、CPU、内存、IP等）
