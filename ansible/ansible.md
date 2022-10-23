@@ -279,3 +279,260 @@ You have new mail in /var/spool/mail/root
 
 **重要：**ansible `-s`: 如何为指定的插件编写剧本片段
 
+##### 2.1.4.2 ansible命令 #####
+
+此工具通过ssh协议，实现对远程主机的配置管理，应用部署，任务执行等功能
+
+建议：先配置ansible主控端基于密钥认证连接到各个被控节点
+
+如下：利用ssh批量实现基于key认证
+
+```SH
+/etc/hosts
+192.168.31.201 master
+192.168.31.202 node01
+192.168.31.203 node02
+
+[root@master ~]# ssh-keygen
+[root@master ~]# for i in node01 node02;do ssh-copy-id -i .ssh/id_rsa.pub $i;done
+[root@master ~]# ssh node02
+Last login: Sun Oct 23 09:22:45 2022 from 192.168.31.20
+[root@node02 ~]# exit
+logout
+Connection to node02 closed.
+```
+
+ 测试：`ping`
+
+```SH
+[root@master ~]# ansible all -m ping
+192.168.31.203 | SUCCESS => {
+    "ansible_facts": {
+        "discovered_interpreter_python": "/usr/bin/python"
+    },
+    "changed": false,
+    "ping": "pong"
+}
+192.168.31.202 | SUCCESS => {
+    "ansible_facts": {
+        "discovered_interpreter_python": "/usr/bin/python"
+    },
+    "changed": false,
+    "ping": "pong"
+}
+[root@master ~]# ansible all --list
+  hosts (2):
+    192.168.31.202
+    192.168.31.203
+```
+
+注意：
+
++ all：表示所有主机
++ all 可以写成分组名称 appservers、*、地址段、关系或、逻辑与、逻辑非、正则表达式等
+
+```SH
+[root@master ~]# ansible appservers --list-hosts
+  hosts (2):
+    192.168.31.202
+    192.168.31.203
+[root@master ~]# ansible "app:&db" -m ping
+192.168.31.202 | SUCCESS => {
+    "ansible_facts": {
+        "discovered_interpreter_python": "/usr/bin/python"
+    },
+    "changed": false,
+    "ping": "pong"
+}
+[root@master ~]# ansible 'app:!db' -m ping			# **注意引号：逻辑非**
+
+192.168.31.203 | SUCCESS => {
+    "ansible_facts": {
+        "discovered_interpreter_python": "/usr/bin/python"
+    },
+    "changed": false,
+    "ping": "pong"
+}
+```
+
+ansible的执行过程：
+
+`-v/-vvv:`查看ansible执行的详细过程
+
+```SH
+<192.168.31.202> (0, '\r\n{"invocation": {"module_args": {"data": "pong"}}, "ping": "pong"}\r\n', 'Shared connection to 192.168.31.202 closed.\r\n')
+<192.168.31.202> ESTABLISH SSH CONNECTION FOR USER: None
+<192.168.31.202> SSH: EXEC ssh -C -o ControlMaster=auto -o ControlPersist=60s -o StrictHostKeyChecking=no -o KbdInteractiveAuthentication=no -o PreferredAuthentications=gssapi-with-mic,gssapi-keyex,hostbased,publickey -o PasswordAuthentication=no -o ConnectTimeout=10 -o ControlPath=/root/.ansible/cp/b5166bec1d 192.168.31.202 '/bin/sh -c '"'"'rm -f -r /root/.ansible/tmp/ansible-tmp-1666508088.25-19549-185664419358812/ > /dev/null 2>&1 && sleep 0'"'"''
+<192.168.31.202> (0, '', '')
+192.168.31.202 | SUCCESS => {
+    "ansible_facts": {
+        "discovered_interpreter_python": "/usr/bin/python"
+    },
+    "changed": false,
+    "invocation": {
+        "module_args": {
+            "data": "pong"
+        }
+    },
+    "ping": "pong"
+}
+
+```
+
+1. 加载自己的配置文件，默认是/etc/ansible/hosts
+2. 加载自己对应的模块文件，如：command
+3. 通过ansible将模块或命令生成对应的临时文件，并将该文件传输至远程服务器的对应执行用户 $Home/.ansible/tmp/ansible-tmp-**/xxx.py
+4. 给文件+x权限执行
+5. 执行并返回结果
+6. 删除临时py文件，退出
+
+
+
+##### 2.1.4.3 ansible-galaxy #####
+
+官方文档：https://cn-ansibledoc.readthedocs.io/zh_CN/latest/galaxy/user_guide.html
+
+此工具会连接https://galaxy.ansible.com/ 下载相应的roles
+
+范例：
+
+```SH
+$ ansible-galaxy list # 列出所有已安装的galaxy
+$ ansible-galaxy remove namespace.role_name #删除
+```
+
+下载：playbook的集合
+
+```SH
+$ansible-galaxy collection install community.mysql
+
+[root@master .ansible]# ansible-galaxy collection install community.mysql
+Process install dependency map
+Starting collection install process
+Installing 'community.mysql:3.5.1' to '/root/.ansible/collections/ansible_collections/community/mysql'
+```
+
+##### 2.1.4.4 ansible-pull #####
+
+此工具会推送ansile的命令值远程，效率无限提升，对运维要求高。
+
+基本上很少用
+
+
+
+##### 2.1.4.5 ansible-playbook #####
+
+此工具用于执行编写好的playbook任务
+
+范例：
+
+注：wall命令：传讯息"***" 给每一个使用者
+
+```yaml
+- hosts: app
+  remote_user: root
+  tasks:
+    - name: hello world
+      command: /usr/bin/wall hello world
+```
+
+```SH
+[root@master playbook]# ansible-playbook hello.yaml
+
+PLAY [app] **********************************************************************************************************
+
+TASK [Gathering Facts] **********************************************************************************************
+ok: [192.168.31.203]
+ok: [192.168.31.202]
+
+TASK [hello world] **************************************************************************************************
+changed: [192.168.31.203]
+changed: [192.168.31.202]
+
+PLAY RECAP **********************************************************************************************************
+192.168.31.202             : ok=2    changed=1    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+192.168.31.203             : ok=2    changed=1    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0
+```
+
+##### 2.1.4.6 ansible-vault #####
+
+保护playbook的安全
+
+此工具可以用于加密解密yaml文件
+
+格式：
+
+```SH
+[root@master playbook]# ansible-vault encrypt hello.yaml
+New Vault password:
+Confirm New Vault password:
+Encryption successful
+[root@master playbook]# ansible-playbook hello.yaml
+ERROR! Attempting to decrypt but no vault secrets found
+[root@master playbook]# cat hello.yaml
+$ANSIBLE_VAULT;1.1;AES256
+38623036363632663137343136643035356362383563643434366132643162373339383265323631
+6339613163666661386236383339353837353430626133350a306239396636646439616134366332
+39643331326662386431303863666563343064666437663530623939303937326661643138306166
+3835623332663232370a616561626130313030336666613330323233393163653665333534373139
+65343034306364633837613765383066643936643437393865623463353165633566656336393339
+64396434373665633330643637313136363764313034323661353165653462306635616435356634
+61336434656538633335633433376537663863343530666664636632663636666536353862636137
+31633662303938393730353534363337366463313332613462356531656364626566366338633038
+33336438613138363063373335303362326430323165346437616262353933313339
+```
+
+解密才能执行：
+
+```SH
+[root@master playbook]# ansible-vault decrypt hello.yaml
+Vault password:
+Decryption successful
+[root@master playbook]# cat hello.yaml
+- hosts: app
+  remote_user: root
+  tasks:
+    - name: hello world
+      command: /usr/bin/wall hello world
+```
+
+##### 2.1.4.7 ansible-console #####
+
+此工具可交互式执行命令，支持tab，ansible 2.0+新增
+
+提示符格式：`执行用户@当前操作的主机组（当前组的主机数量）[f:并发数]$`
+
+```SH
+[root@master ~]# ansible-console
+Welcome to the ansible console.
+Type help or ? to list commands.
+
+root@all (2)[f:5]$ 
+```
+
+常用子命令：
+
++ 设置并发数：forks n 例如：forks10
++ 切换组：cd 主机组，例如：cd db
++ 列出当前主机组列表：list
++ 列出所有的内置命令：？或help
+
+示例：
+
+```sh
+root@db (1)[f:5]$ cd all
+root@all (2)[f:5]$
+root@all (2)[f:5]$ list
+192.168.31.202
+192.168.31.203
+root@all (2)[f:5]$ cd db
+root@db (1)[f:5]$ list
+192.168.31.202
+root@db (1)[f:5]$ yum name=httpd state=present
+...
+root@db (1)[f:5]$ service name=httpd state=started
+....
+```
+
+192.168.31.202查看httpd状态：`active (running)`
+
