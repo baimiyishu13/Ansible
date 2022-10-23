@@ -1,0 +1,5 @@
+- hosts: app
+  remote_user: root
+  tasks:
+    - name: hello world
+      command: /usr/bin/wall hello world
