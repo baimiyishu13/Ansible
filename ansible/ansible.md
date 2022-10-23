@@ -54,7 +54,7 @@
 
 #### 2.1.1 Ansible 介绍 & 组成 ####
 
- ![ansible Logo](\image\image-20221023082257931.png)
+ ![ansible Logo](../images/image-20221023082257931.png)
  
 
 官方：https://www.ansible.com/
