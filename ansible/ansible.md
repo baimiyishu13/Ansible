@@ -536,3 +536,436 @@ root@db (1)[f:5]$ service name=httpd state=started
 
 192.168.31.202查看httpd状态：`active (running)`
 
+
+### 3.1 Ansible常用模块详解 ###
+
+ansible：上千个模块
+
+虽然模块众多，但是常用的也就几十个而已，正对特定业务只用1-几个模块
+
+
+
+#### 3.1.1 Command ####
+
+`默认模块`
+
+功能：再远程主机执行命令，此为默认模块，可忽略 `-m`选项
+
+-m：指定模块
+
+-a：模块的参数
+
+注意：command模块的linux命令存在局限性，并发所有linux都可以成功执行！！
+
+```SH
+[root@master ~]# ansible-doc -s command
+- name: Execute commands on targets
+  command:
+      argv:                  # Passes the command as a list rather than a string. Use `argv' to avoid quoting
+                               values that would otherwise be interpreted
+                               incorrectly (for example "user name"). Only the
+                               string or the list form can be provided, not both.
+                               One or the other must be provided.
+      chdir:                 # Change into this directory before running the command. #在运行命令之前西先到到此目录。
+      cmd:                   # The command to run.
+      creates:               # A filename or (since 2.0) glob pattern. If it already exists, this step *won't* be
+                               run.
+      free_form:             # The command module takes a free form command to run. There is no actual parameter
+                               named 'free form'.
+      removes:               # A filename or (since 2.0) glob pattern. If it already exists, this step *will* be
+                               run.
+      stdin:                 # Set the stdin of the command directly to the specified value.
+      stdin_add_newline:     # If set to `yes', append a newline to stdin data.
+      strip_empty_ends:      # Strip empty lines from the end of stdout/stderr in result.
+      warn:                  # Enable or disable task warnings.
+```
+
+注意：
+
++ creates 和 removes：如根据文件是否存在判断是否执行某个操作，creates存在跳过， removes存在执行
+
+示例：
+
+```SH
+[root@master ~]# ansible db -m command -a 'systemctl start docker'
+192.168.31.202 | CHANGED | rc=0 >>
+
+[root@master ~]# ansible db -m command -a 'pwd'
+192.168.31.202 | CHANGED | rc=0 >>
+/root
+[root@master ~]# ansible db -a 'pwd'  # command 默认模块
+192.168.31.202 | CHANGED | rc=0 >>
+/root
+
+[root@master ~]# ansible db -m command -a 'chdir=/etc pwd'	
+192.168.31.202 | CHANGED | rc=0 >>
+/etc
+[root@master ~]# ansible db -m command -a 'creates=/opt pwd'
+192.168.31.202 | SUCCESS | rc=0 >>
+skipped, since /opt exists
+[root@master ~]# ansible db -m command -a 'removes=/opt pwd'
+192.168.31.202 | CHANGED | rc=0 >>
+/root
+```
+
+shell模块：为了解决command不支持很多特殊符号的问题
+
+#### 3.1.2 shell模块 ####
+
+功能：和command相似，用shell执行命令
+
+示例：
+
+```bash
+[root@master ~]# ansible db -m shell -a 'echo $HOSTNAME'
+192.168.31.202 | CHANGED | rc=0 >>
+node01
+
+
+[root@master ~]# ansible db -m shell -a 'echo hello > /opt/1.txt'
+192.168.31.202 | CHANGED | rc=0 >>
+
+[root@master ~]# ansible db -m shell -a 'cat /opt/1.txt'
+192.168.31.202 | CHANGED | rc=0 >>
+hello
+```
+
+注意：调用bash执行命令，类似awk这些复杂的命令，即使调用shell 也可能会失败，解决办法：写道脚本copy到远程执行，再将结果拉回。
+
+#### 3.1.2 Script模块 ####
+
+功能：远程主机上运行ansible服务器上的脚本
+
+```SH
+#!/bin/sh
+hostname
+```
+
+```SH
+ ansible db -m script -a script/test.sh
+```
+
+注意：shell 模块执行命令前提条件：目标已经存放再主机
+
+```SH
+[root@master ~]# scp script/test.sh node01:/opt
+test.sh                                                                          100%   19    12.4KB/s   00:00
+[root@master ~]# ansible db -m shell -a 'chdir=/opt chmod +x test.sh&&sh test.sh'
+192.168.31.202 | CHANGED | rc=0 >>
+node01
+```
+
+
+
+script优势：不需要将脚本拷贝到被控节点
+
+
+
+#### 3.1.3 Copy模块 ####
+
+功能：从ansible服务器主控端复制文件到远程主机
+
+backup：yes/no ：备份
+
+**（1）备份**
+
+如果目标存在，默认覆盖（`覆盖：高危命令`），先指定备份
+
+```SH
+[root@master ~]# ansible db -m shell -a 'cat /tmp/test'
+192.168.31.202 | CHANGED | rc=0 >>
+test copy
+
+echo test copy backup > test
+ansible db -m copy -a 'src=/root/test dest=/tmp/test backup=yes'
+
+[root@master ~]# ansible db -m shell -a 'ls /tmp | grep test'
+192.168.31.202 | CHANGED | rc=0 >>
+test
+test.109562.2022-10-23@19:18:07~		# 备份文件
+```
+
+**（2）指定内容**
+
+content ：直接指定内容
+
+```SH
+ansible db -m copy -a "content='test content\n' dest=/tmp/test2"
+
+[root@master ~]# ansible db -m shell -a 'cat /tmp/test2'
+192.168.31.202 | CHANGED | rc=0 >>
+test content
+```
+
+**（3）复制目录下文件**
+
+复制目录下的文件，不包括目录本身
+
+```SH
+ansible db -m copy -a 'src=script/ dest=/backup'
+
+[root@master ~]# ansible db -m shell -a 'ls /backup'
+192.168.31.202 | CHANGED | rc=0 >>
+test.sh
+```
+
+#### 3.1.4 Fetch模块 ####
+
+功能：从远端提取文件至ansible主控端，与copy相反，目前不支持目录
+
+范例：
+
+```SH
+ansible all -m fetch -a 'src=/etc/redhat-release dest=/data/'
+```
+
+生成了子目录
+
+```SH
+[root@master ~]# tree /data/
+/data/
+├── 192.168.31.202
+│   └── etc
+│       └── redhat-release
+└── 192.168.31.203
+    └── etc
+        └── redhat-release
+```
+
+#### 3.1.5 File模块 ####
+
+功能：设置文件文件属性
+
+状态：state
+
++ touch：生成空文件
++ abset：递归删除（删除）
++ directory：目录
+
+path：必选
+
+recurse：递归创建目录，state必须是directory
+
+示例：
+
+```SH
+ ansible db -m file -a 'path=/data state=directory'
+ 
+# 创建空文件
+ ansible db -m file -a 'path=/data/test.txt state=touch'
+ 
+# 删除文件
+ ansible db -m file -a 'path=/data/test.txt state=absent'
+
+# 创建目录
+ ansible db -m shell -a 'useradd mysql'
+ ansible db -m file -a 'path=/data/mysql state=directory recurse=true owner=mysql group=mysql'
+ 
+ # 创建软链接
+ ansible db -m file -a 'path=/data/testfile dest=/data/testfile-link state=link'
+```
+
+#### 3.1.6 unarchive模块 ####
+
+功能：解包\解压包
+
+实现方法：（2种）
+
+1. 将ansible 主机上的压缩包传到远程被控节点后解压缩到特定目录，设置`COPY=yus`
+2. 将远程主机上的某个压缩包解压到指定路径下，设置`copy=no`
+
+常见参数
+
++ `COPY`：默认yes，拷贝的文件时从ansible主机上复制到 被控节点。如果`copy=no` 会在远程主机上寻找src源文件
++ `remote_src`：和copy功能一样且互斥，yes表示在被控节点，不在主控端。no表示文件在主控端
++ `src`：源路径，可以在主控端和被控节点，如果在被控节点，则需要设置`copy=no`
++ `dest`：被控节点的目标路径
++ `mode`：设置解压缩的文件权限
+
+示例：
+
+```SH
+[root@master ~]# tar -cvf data.tar /data
+
+ansible db -m unarchive -a 'src=/root/data.tar dest=/root/test'
+```
+
+被控节点：压缩包
+
+```SH
+[root@node01 ~]# tar -zcvf test/data.tar.gz test/data/
+[root@node01 ~]# ls test/
+data  data.tar.gz
+
+# 主控端
+ansible db -m unarchive -a 'src=/root/test/data.tar.gz dest=/root/test2 copy=no'
+```
+
+**remote_src &mode**
+
+```SH
+ansible db -m unarchive -a 'src=/root/test/data.tar.gz dest=/root/test remote_src=yes mode=755'
+```
+
+注意：打包功能直接使用copy拷贝到被控节点！
+
+
+
+#### 3.1.7 Archive模块 ####
+
+功能：打包压缩
+
+示例：
+
+```SH
+ansible db -m archive -a 'path=/root/test/test/data dest=/root/data.tar.gz format=gz'
+```
+
+#### 3.1.8 Hostname模块 ####
+
+功能：管理主机名
+
+```SH
+ansible db -m hostname -a 'name=dbsrc'
+[root@master ~]# ansible db -m shell -a 'cat /etc/hostname'
+192.168.31.202 | CHANGED | rc=0 >>
+dbsrc
+```
+
+#### 3.1.9 Cron模块 ####
+
+功能：计划任务
+
+支持时间：分、时、日、月、周
+
+minute、hour、day、month、weekday
+
+**重要数据备份脚本**
+
+```SH
+# 被控节点
+[root@node01 ~]# mkdir console
+[root@node01 ~]# cd console/
+[root@node01 console]# touch index.thml
+```
+
+需要备份 config下的文件 周1-5，每个2小时30分
+
+```SH
+[root@node01 ~]# cat console-backup.sh
+#!/bin/sh
+cp /root/console/index.html /root/console/index-`date +%F-%k-%M-%S`.html &>/dev/null
+[root@node01 ~]# chmod a+x console-backup.sh
+```
+
+测试：每分钟
+
+```SH
+# 主控端
+ansible db -m cron -a 'minute=*/1 job=/root/console-backup.sh name=backup name=backup-console'
+
+# 被控节点
+[root@node01 console]# ll
+total 0
+-rw-r--r-- 1 root root 0 Oct 23 22:03 index-2022-10-23-22-03-01.html
+-rw-r--r-- 1 root root 0 Oct 23 22:04 index-2022-10-23-22-04-01.html
+-rw-r--r-- 1 root root 0 Oct 23 21:57 index.htm
+```
+
+`disabled=yes`：禁止任务计划（注释掉），启用就是 no
+
+```SH
+ ansible db -m cron -a 'minute=*/1 job=/root/console-backup.sh name=backup name=backup-console disabled=yes'
+```
+
+查看：`crontab -l`
+
+```SH
+[root@master ~]# ansible db -m shell -a 'crontab -l'                                                 
+192.168.31.202 | CHANGED | rc=0 >>
+*/5 * * * * /usr/sbin/ntpdate time2.aliyun.com
+#Ansible: backup-console
+#*/1 * * * * /root/console-backup.sh
+```
+
+删除任务计划：
+
+```SH
+ansible db -m cron -a 'name=backup-console state=absent'
+```
+
+#### 3.1.10 Yum 模块 ####
+
+功能：管理软件包,支持RHEL、Centos、Fedora
+
+状态state：
+
++ absent：删除
++ latest：安装最新
++ present确保存在(安装)
+
+示例：
+
+```SH
+ansible db -m yum -a 'name=httpd state=present'
+ansible db -m yum -a 'name=httpd state=latest'
+ansible db -m yum -a 'name=httpd state=absent'
+```
+
+#### 3.1.11 Service 模块 ####
+
+功能：管理服务
+
+状态：state
+
++ started：启动
++ stopped：暂停
++ restarted：重启
++ reloaded：重装
++ enabled：开机启动 enables=yes
+
+示例：
+
+```SH
+ansible db -m service -a 'name=httpd state=restarted'
+ansible db -m service -a 'name=httpd enabled=yes'
+```
+
+#### 3.1.12 User模块 ####
+
+功能：管理用户
+
+示例：
+
++ name：用户名
++ comment：描述
++ uid: 1040
++ group: 用户的主组
++ groups: 用户的附加组
++ remove：删除用户
++ create_home：要不要创建home目录
++ home：指定用户的home目录
+
+```SH
+ansible db -m user -a 'name=johnd comment="John Doe" uid=1040 group=root'
+ansible db -m user -a "name=user1 comment='test user' uid=1042 home=/app/user1 group=root"
+
+# 删除
+ansible db -m user -a 'name=user1 state=absent remove=yes'
+```
+
+#### 3.1.12 Group模块 ####
+
+功能：管理组
+
+state：present:创建,absent:删除
+
+system：创建系统组(几乎用不到)
+
+```SH
+# 创建
+ansible db -m group -a 'name=nginx gid=88 system=yes'
+
+# 删除
+ansible db -m group -a 'name=nginx state=absent'
+```
