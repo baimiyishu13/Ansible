@@ -1,3 +1,26 @@
+- [### Playbook](#-playbook)
+    - [1.1 playbook介绍](#11-playbook介绍)
+    - [1.2 YAML语言](#12-yaml语言)
+    - [1.3 Playbook 核心元素](#13-playbook-核心元素)
+      - [1.3.1 host 组件](#131-host-组件)
+      - [1.3.2 remote_user](#132-remote_user)
+      - [1.3.3 task列表和action组件](#133-task列表和action组件)
+      - [1.3.4 其他组件](#134-其他组件)
+      - [1.3.5 shell脚本 vs playbook](#135-shell脚本-vs-playbook)
+  - [2.2 playbook 命令](#22-playbook-命令)
+  - [2.3 Playbook初步](#23-playbook初步)
+    - [2.3.1 创建mysql用户](#231-创建mysql用户)
+    - [2.3.2 利用playbook安装nginx](#232-利用playbook安装nginx)
+  - [2.4 handlers和notify](#24-handlers和notify)
+  - [2.5 tags组件](#25-tags组件)
+  - [2.6 Playbook 变量](#26-playbook-变量)
+  - [3.1Playbook的高级用法模板](#31playbook的高级用法模板)
+    - [3.1.1 jinja2语法](#311-jinja2语法)
+    - [3.1.2 template使用](#312-template使用)
+    - [3.1.3 for循环：](#313-for循环)
+    - [3.1.4 if 判断](#314-if-判断)
+    - [3.1.5 when](#315-when)
+    - [3.1.6 迭代 with_items](#316-迭代-with_items)
 ### Playbook ###
 ---
 [Last modification date：2000/10/24]
@@ -624,5 +647,255 @@ templates可以算数运算但是使用最多的是`判断 if when `
       service:
         name: httpd
         state: restarted
+```
+
+
+
+#### 3.1.3 for循环：
+
+```SH
+[root@matser test]# tree
+.
+├── install_httpd.yaml
+└── templates
+    └── httpd.web.j2
+
+```
+
+文件：`install_httpd.yaml`
+
+```SH
+---
+- hosts: db
+  remote_user: root
+  vars:
+    httpd_web:
+      - a
+      - b
+      - c
+
+  tasks:
+    - name: install
+      yum:
+        name: httpd
+        state: latest
+    - name: template config to remote hosts
+      template:
+        src: httpd.web.j2
+        dest: /var/www/html/index.html
+        backup: yes
+    - name: start service
+      service:
+        name: httpd
+        state: started
+```
+
+文件：`templates/httpd.web.j2`
+
+```jinja2
+{% for data in httpd_web %}
+server {
+  data: {{ data }}
+}
+{% endfor %
+```
+
+==如果是k:v 键值对==
+
+（1）单行
+
+```yaml
+- hosts: db
+  remote_user: root
+  vars:
+    httpd_web:
+      - a: 1
+```
+
+文件：`templates/httpd.web.j2`
+
+```jinja2
+{% for data in httpd_web %}
+server {
+  data: {{ data.a }}
+}
+{% endfor %}
+```
+
+（2）多参
+
+```yaml
+---
+- hosts: db
+  remote_user: root
+  vars:
+    httpd_web:
+      - listen: 80
+        servername: "web1.com"
+      - listen: 8080
+        servername: "web2.com"
+      - {listen: 8888,servername: "web1.com"}
+```
+
+j2文件：
+
+```jinja2
+{% for data in httpd_web %}
+server {
+  listen {{ data.listen }}
+  servername {{ data.servername }}
+}
+{% endfor %}
+```
+
+结果：
+
+```SH
+server {
+  listen 80
+  servername web1.com
+}
+server {
+  listen 8080
+  servername web2.com
+}
+server {
+  listen 8888
+  servername web1.com
+}
+```
+
+#### 3.1.4 if 判断
+
+> 使for更灵活
+
+```yaml
+---
+- hosts: db
+  remote_user: root
+  vars:
+    httpd_web:
+      - web1:    # 对应的值为控制，相当于只有两个键值对；
+        listen: 80
+        root: "/var/www/web1"
+      - web2:
+        listen: 8080
+        servername: "www.web2.com"
+        root: "/var/www/web2"
+      - web3:
+        listen: 8080
+        server_name: "www.web3.com"
+        root: "/var/www/web3"
+  tasks:
+    - name: install
+      yum:
+        name: httpd
+        state: latest
+    - name: template config to remote hosts
+      template:
+        src: httpd.web.j2
+        dest: /var/www/html/index.html
+        backup: yes
+    - name: start service
+      service:
+        name: httpd
+        state: started
+```
+
+可以根据键值对的值、数量等条件判断。生产语句块
+
+if:
+
+```SH
+{% if data.servername is defined %} # defined : 存在生产，不存在不生成
+{% if data.listen == 8080 %} # ==
+```
+
+#### 3.1.5 when
+
+when语句（当...满足时）可以实现条件测试，如果需要根据变量、facts或此前任务的执行结果来作为某stak执行与否的前提时，要用到条件测试咋样task后添加when字句，即可使用条件测试mjinja2语法格式。
+
+https://galaxy.ansible.com/buluma/mysql
+
+```yaml
+---
+- hosts: db
+  remote_user: root
+  tasks:
+  - name: system
+    shell: touch /data/1.txt
+    when:
+      - ansible_userspace_architecture == "x86_64"
+```
+
+常用方法：is defined 判断
+
+
+
+#### 3.1.6 迭代 with_items
+
+迭代：当有需要重复性执行任务时，可以使用迭代机制。
+
+对迭代项的引用，固定变量名为“item”
+
+要在task中使用with_items给定要迭代的元素列表
+
+> for、if 在jinja2中使用。when和with_items在playbook中使用。
+
+**元素列表格式：**
+
++ 字符串
++ 字典
+
+示例：
+
+```yaml
+---
+- hosts: web
+  remote_user: root
+
+  tasks:
+  - name: file
+    file:
+      path: "/root/{{ item }}"
+      state: touch
+    with_items:
+      - ib_logfile0
+      - ib_logfile1
+```
+
+```YAML
+---
+- hosts: web
+  remote_user: root
+
+  tasks:
+  - name: install
+    yum:
+      name: "{{ item }}"
+      state: present
+    with_items:
+      - httpd
+      - nginx
+      - tree
+```
+
+创建用户：
+
+```yaml
+---
+- name: Ensure MySQL users are present.
+  mysql_user:
+    name: "{{ item.name }}"
+    host: "{{ item.host | default('localhost') }}"
+    password: "{{ item.password }}"
+    priv: "{{ item.priv | default('*.*:USAGE') }}"
+    state: "{{ item.state | default('present') }}"
+    append_privs: "{{ item.append_privs | default('no') }}"
+    encrypted: "{{ item.encrypted | default('no') }}"
+  #with_items: "{{ mysql_users }}"
+  with_items:
+    - { name: 'mysql', password: 'zzz'}
+    - { name: 'tom', password: 'zzz'}
 ```
 
