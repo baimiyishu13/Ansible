@@ -80,5 +80,5 @@ Type "help", "copyright", "credits" or "license" for more information.
 >>>
 ```
 
-
+ln -s python3 /usr/bin/python3
 
